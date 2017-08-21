@@ -151,6 +151,8 @@ public class SolrAdapter implements BridgeAdapter {
         JSONObject json = (JSONObject)JSONValue.parse(jsonResponse);
         JSONObject response = (JSONObject)json.get("response");
         JSONArray docsArray = (JSONArray)response.get("docs");
+        Object countObj = response.get("numFound");
+        Long count = (Long)countObj;
         
         List<Record> recordList = new ArrayList<Record>();
         List<String> fieldList = new ArrayList<String>();
@@ -167,8 +169,9 @@ public class SolrAdapter implements BridgeAdapter {
         }
         
         // Create the metadata that needs to be returned.
-        Map<String,String> metadata = new LinkedHashMap<String,String>();        
-        metadata.put("count",String.valueOf(recordList.size()));
+        Map<String,String> metadata = new LinkedHashMap<String,String>();
+        //Everything
+        metadata.put("count",count.toString());
         metadata.put("size", String.valueOf(recordList.size()));
 
         if (request.getFields() != null && request.getFields().isEmpty() == false) {
