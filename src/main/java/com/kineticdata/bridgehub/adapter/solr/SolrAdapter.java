@@ -29,6 +29,11 @@ import org.apache.http.impl.client.DefaultHttpClient;
 import org.apache.http.util.EntityUtils;
 import org.apache.commons.codec.binary.Base64;
 import org.apache.commons.lang.StringUtils;
+import org.apache.http.NameValuePair;
+import org.apache.http.client.methods.HttpPost;
+import org.apache.http.client.methods.HttpRequestBase;
+import org.apache.http.message.BasicNameValuePair;
+import org.apache.http.client.entity.UrlEncodedFormEntity;
 import org.json.simple.JSONArray;
 import org.json.simple.JSONObject;
 import org.json.simple.JSONValue;
@@ -189,6 +194,11 @@ public class SolrAdapter implements BridgeAdapter {
      *--------------------------------------------------------------------------------------------*/
     
     public String buildUrl(String queryMethod, BridgeRequest request) throws BridgeError {
+
+        // Build up the url that you will use to retrieve the source data. Use the query variable
+        // instead of request.getQuery() to post a query without parameter placeholders.
+        StringBuilder url = new StringBuilder();
+        
         Map<String,String> metadata = BridgeUtils.normalizePaginationMetadata(request.getMetadata());
         String pageSize = "1000";
         String offset = "0";
@@ -200,61 +210,65 @@ public class SolrAdapter implements BridgeAdapter {
             offset = metadata.get("offset");
         }
         
-        SolrQualificationParser parser = new SolrQualificationParser();
-        String query = null;
-        try {
-            query = URLEncoder.encode(parser.parse(request.getQuery(),request.getParameters()), "UTF-8");
-        } catch (UnsupportedEncodingException e) {
-            logger.error(e.getMessage());
-            throw new BridgeError("There was a problem URL encoding the bridge qualification");
+        url.append(this.apiEndpoint)
+            .append("/")
+            .append(request.getStructure())
+            .append("/select")
+            .append("?wt=json");
+
+        //Set row count to 0 if doing a count.
+        if (queryMethod.equals("count")) {
+            url.append("&rows=0");
+        } else {
+            url.append("&rows=" + pageSize)
+                .append("&start=" + offset);
         }
         
+        return url.toString();
+        
+    }
+    
+    public HttpEntity buildRequestBody(String queryMethod, BridgeRequest request) throws BridgeError {
+        List<NameValuePair> params = new ArrayList<NameValuePair>();
+        HttpEntity result = null;
+        
+        SolrQualificationParser parser = new SolrQualificationParser();
+        String query = parser.parse(request.getQuery(),request.getParameters());        
         //Set query to return everything if no qualification defined.
         if (StringUtils.isBlank(query)) {
             query = "*:*";
         }
-
-        // Build up the url that you will use to retrieve the source data. Use the query variable
-        // instead of request.getQuery() to get a query without parameter placeholders.
-        StringBuilder url = new StringBuilder();
-        url.append(this.apiEndpoint)
-            .append("/")
-            .append(request.getStructure())
-            .append("/select?q=")
-            .append(query);
         
-        //Set row count to 0 if doing a count.
-        if (queryMethod.equals("count")) {
-            url.append("&rows=0");
+        // If the query is a JSON object...
+        if (query.matches("^\\s*\\{.*?\\}\\s*$")) {
+            params.add(new BasicNameValuePair("json", query));
+        } else {
+            params.add(new BasicNameValuePair("q", query));
         }
                 
-        //only set pagination if we're not counting.
+        //only set sorting and field return limitation if we're not counting.
         if (queryMethod.equals("count") == false) {
-            url.append("&rows=")
-                .append(pageSize)
-                .append("&start=")
-                .append(offset);
+
             //only set field limitation if we're not counting *and* the request specified fields to be returned.
             if (request.getFields() != null && request.getFields().isEmpty() == false) {
                 StringBuilder includedFields = new StringBuilder();
                 String[] bridgeFields = request.getFieldArray();
                 for (int i = 0; i < request.getFieldArray().length; i++) {
                     //strip _source from the beginning of the specified field name as this is redundent to Solr.
-                    includedFields.append(bridgeFields[i].replaceFirst("^_source\\.(.*)", "$1"));
+                    includedFields.append(bridgeFields[i]);
                     //only append a comma if this is not the last field
                     if (i != (request.getFieldArray().length -1)) {
                         includedFields.append(",");
                     }
                 }
-                url.append("&fl=")
-                    .append(URLEncoder.encode(includedFields.toString()));
+                params.add(new BasicNameValuePair("fl", includedFields.toString()));
             }
             //only set sorting if we're not counting *and* the request specified a sort order.
             if (request.getMetadata("order") != null) {
                 List<String> orderList = new ArrayList<String>();
                 //loop over every defined sort order and add them to the Elasicsearch URL
                 for (Map.Entry<String,String> entry : BridgeUtils.parseOrder(request.getMetadata("order")).entrySet()) {
-                    String key = entry.getKey().replaceFirst("^_source\\.(.*)", "$1");
+                    String key = entry.getKey();
                     if (entry.getValue().equals("DESC")) {
                         orderList.add(String.format("%s:desc", key));
                     }
@@ -262,17 +276,26 @@ public class SolrAdapter implements BridgeAdapter {
                         orderList.add(String.format("%s:asc", key));
                     }
                 }
-                String order = StringUtils.join(orderList,",");
-                url.append("&sort=")
-                    .append(URLEncoder.encode(order));
+                params.add(
+                    new BasicNameValuePair(
+                        "sort",
+                        StringUtils.join(orderList,",")
+                    )
+                );
             }
             
         }
         
-        url.append("&wt=json");
-
-        return url.toString();
+        try {
+            result = new UrlEncodedFormEntity(params);
+        } catch (UnsupportedEncodingException exceptionDetails) {
+            throw new BridgeError (
+                "Unable to generate the URL encoded HTTP Request body for the Solr API request.",
+                exceptionDetails
+            );
+        }
         
+        return result;
     }
     
     public void mapToFields (JSONObject currentObject, StringBuilder currentFieldPrefix, Map<String, Object> bridgeFields) throws BridgeError {
@@ -294,11 +317,10 @@ public class SolrAdapter implements BridgeAdapter {
     /*----------------------------------------------------------------------------------------------
      * PRIVATE HELPER METHODS
      *--------------------------------------------------------------------------------------------*/
-    private HttpGet addBasicAuthenticationHeader(HttpGet get, String username, String password) {
+    private void addBasicAuthenticationHeader(HttpRequestBase get, String username, String password) {
         String creds = username + ":" + password;
         byte[] basicAuthBytes = Base64.encodeBase64(creds.getBytes());
         get.setHeader("Authorization", "Basic " + new String(basicAuthBytes));
-        return get;
     }
     
     private String solrQuery(String queryMethod, BridgeRequest request) throws BridgeError{
@@ -309,27 +331,40 @@ public class SolrAdapter implements BridgeAdapter {
         // Initialize the HTTP Client, Response, and Get objects.
         HttpClient client = new DefaultHttpClient();
         HttpResponse response;
-        HttpGet get = new HttpGet(url.toString());
+        HttpPost post = new HttpPost(url);
 
         // Append the authentication to the call. This example uses Basic Authentication but other
         // types can be added as HTTP GET or POST headers as well.
         if (this.username != null && this.password != null) {
-            get = addBasicAuthenticationHeader(get, this.username, this.password);
+            addBasicAuthenticationHeader(post, this.username, this.password);
         }
+        
+        post.setEntity(
+            buildRequestBody(queryMethod, request)
+        );
 
         // Make the call to the REST source to retrieve data and convert the response from an
         // HttpEntity object into a Java string so more response parsing can be done.
         try {
-            response = client.execute(get);
+            response = client.execute(post);
             Integer responseStatus = response.getStatusLine().getStatusCode();
+            logger.trace("Request response code: "+response.getStatusLine().getStatusCode());
             
             if (responseStatus >= 300 || responseStatus < 200) {
-                throw new BridgeError("The Solr server returned a HTTP status code of " + responseStatus + ", 200 was expected.");
+                HttpEntity entity = response.getEntity();
+                String errorMessage = EntityUtils.toString(entity);
+                throw new BridgeError(
+                    String.format(
+                        "The Solr server returned a HTTP status code of %d, 200 was expected. Response body: %s",
+                        responseStatus,
+                        errorMessage
+                    )
+                );
             }
             
             HttpEntity entity = response.getEntity();
             result = EntityUtils.toString(entity);
-            logger.trace("Request response code: "+response.getStatusLine().getStatusCode());
+
         } catch (IOException e) {
             logger.error(e.getMessage());
             throw new BridgeError("Unable to make a connection to the Solr server");
@@ -344,7 +379,7 @@ public class SolrAdapter implements BridgeAdapter {
         HttpGet get = new HttpGet(String.format("%s/admin/cores?action=STATUS",restEndpoint));
         
         if (username != null && password != null) {
-            get = addBasicAuthenticationHeader(get, this.username, this.password);
+            addBasicAuthenticationHeader(get, this.username, this.password);
         }
 
         DefaultHttpClient client = new DefaultHttpClient();
@@ -363,7 +398,7 @@ public class SolrAdapter implements BridgeAdapter {
         }
         catch (IOException e) {
             logger.error(e.getMessage());
-            throw new BridgeError("Unable to make a connection to the Solr core status check API endpoint."); 
+            throw new BridgeError("Unable to make a connection to the Solr core status check API endpoint.", e); 
         }
     }
 

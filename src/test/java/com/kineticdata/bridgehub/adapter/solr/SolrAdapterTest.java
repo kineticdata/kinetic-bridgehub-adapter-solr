@@ -10,9 +10,13 @@ import com.kineticdata.bridgehub.adapter.BridgeError;
 import com.kineticdata.bridgehub.adapter.BridgeRequest;
 import com.kineticdata.bridgehub.adapter.Count;
 import com.kineticdata.bridgehub.adapter.Record;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import org.json.simple.JSONArray;
 import org.json.simple.JSONObject;
 import org.json.simple.JSONValue;
@@ -32,78 +36,9 @@ public class SolrAdapterTest {
     private final String structure = "sample_techproducts_configs";
     
     @Test
-    public void test_escapedSearchUrl() throws Exception {
-        
-        StringBuilder expectedUrl = new StringBuilder();
-        String actualUrl = null;
-        String logLevel = "This is an error.";
-        String date = "2021-01-01";
-        String pageSize = "1000";
-        String offset = "0";
-        String query = "message:\"<%= parameter[\"log level\"] %>\" AND _timestamp:><%= parameter[\"date\"] %>";
-        
-        BridgeRequest request = new BridgeRequest();
-        
-        Map<String,String> configuration = new HashMap<String,String>();
-        configuration.put("Username",null);
-        configuration.put("Password",null);
-        configuration.put("Solr URL",apiUrl);
-        
-        request.setStructure(structure);
-        request.setQuery(query);
-        
-        Map<String, String> bridgeParameters = new HashMap<String, String>();
-        bridgeParameters.put("log level", logLevel);
-        bridgeParameters.put("date", date);
-        request.setParameters(bridgeParameters);
-        
-        SolrAdapter adapter = new SolrAdapter();
-        adapter.setProperties(configuration);
-        adapter.initialize();
-        
-        Map<String, String> bridgeMetadata = new HashMap<String, String>();
-        bridgeMetadata.put("pageSize", pageSize);
-        bridgeMetadata.put("offset", offset);
-        request.setMetadata(bridgeMetadata);
-        
-        expectedUrl.append(apiUrl)
-            .append("/")
-            .append(structure)
-            .append("/")
-            .append("select?q=message%3A%22This%5C+is%5C+an%5C+error.%22+AND+_timestamp%3A%3E2021%5C-01%5C-01")
-            .append("&rows=")
-            .append(pageSize)
-            .append("&start=")
-            .append(offset)
-            .append("&wt=json");
-
-        try {
-            actualUrl = adapter.buildUrl("search", request);
-        } catch (BridgeError e) {
-            System.out.println(e.getMessage());
-            throw new RuntimeException(e);
-        }
-        
-        assertEquals(expectedUrl.toString(), actualUrl);
-        
-        try {
-            bridgeMetadata.put("order", "<%=field[\"_timestamp\"]%>:DESC,<%=field[\"_source.message\"]%>:ASC");
-            request.setMetadata(bridgeMetadata);
-            actualUrl = adapter.buildUrl("search", request);
-        } catch (BridgeError e) {
-            throw new RuntimeException(e);
-        }
-        
-        expectedUrl.delete(expectedUrl.indexOf("&wt=json"), expectedUrl.indexOf("&wt=json") + 8);
-        expectedUrl.append("&sort=_timestamp%3Adesc%2Cmessage%3Aasc&wt=json");
-        assertEquals(expectedUrl.toString(), actualUrl);
-        
-    }
-    
-    @Test
     public void testCountResults() throws Exception {
         Integer expectedCount = 1;
-        String expectedUrl = String.format("%s/%s/select?q=message%%3Aerror&rows=0&wt=json", apiUrl, structure);
+        String expectedUrl = String.format("%s/%s/select?wt=json&rows=0", apiUrl, structure);
         Count actualCount;
         
         Map<String,String> configuration = new HashMap<String,String>();
@@ -141,8 +76,48 @@ public class SolrAdapterTest {
     }
     
     @Test
+    public void testCountResults_solrJson() throws Exception {
+        Integer expectedCount = 1;
+        String expectedUrl = String.format("%s/%s/select?wt=json&rows=0", apiUrl, structure);
+        Count actualCount;
+        
+        Map<String,String> configuration = new HashMap<String,String>();
+        configuration.put("Username",null);
+        configuration.put("Password",null);
+        configuration.put("Solr URL",apiUrl);
+        
+        SolrAdapter adapter = new SolrAdapter();
+        adapter.setProperties(configuration);
+        adapter.initialize();
+        
+        Map<String, String> bridgeParameters = new HashMap<String, String>();
+        bridgeParameters.put("log level", "error");
+        
+        Map<String, String> bridgeMetadata = new HashMap<String, String>();
+        bridgeMetadata.put("pageSize", "1000");
+        bridgeMetadata.put("offset", "0");        
+        
+        BridgeRequest request = new BridgeRequest();
+        request.setParameters(bridgeParameters);
+        request.setMetadata(bridgeMetadata);        
+        request.setStructure(structure);
+        request.setQuery("{\"type\": \"Solr DSL\", \"query\": \"{\\\"query\\\": \\\"message:*<%= parameter[\"log level\"] %>*\\\"}\"}");
+        
+        assertEquals(expectedUrl, adapter.buildUrl("count", request));
+        
+        try {
+            actualCount = adapter.count(request);
+        } catch (BridgeError e) {
+            System.out.println(e.getMessage());
+            throw new RuntimeException(e);
+        }
+        
+        assertEquals(expectedCount, actualCount.getValue());
+    }
+    
+    @Test
     public void testRetrieveResults() throws Exception {
-        String expectedUrl = String.format("%s/%s/select?q=message%%3Aerror&rows=1000&start=0&fl=message%%2C_timestamp&wt=json", apiUrl, structure);
+        String expectedUrl = String.format("%s/%s/select?wt=json&rows=1000&start=0", apiUrl, structure);
         
         Map<String,String> configuration = new HashMap<String,String>();
         configuration.put("Username",null);
@@ -210,5 +185,5 @@ public class SolrAdapterTest {
         assertThat(actualBridgeFields, is(expectedBridgeFields));
         
     }
-    
+        
 }
