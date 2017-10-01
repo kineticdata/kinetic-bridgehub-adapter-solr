@@ -3,7 +3,6 @@ package com.kineticdata.bridgehub.adapter.solr;
 import com.kineticdata.bridgehub.adapter.BridgeError;
 import com.kineticdata.bridgehub.adapter.QualificationParser;
 import static com.kineticdata.bridgehub.adapter.QualificationParser.PARAMETER_PATTERN;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
@@ -16,21 +15,17 @@ import org.json.simple.parser.ParseException;
 
 public class SolrQualificationParser extends QualificationParser {
     
-    //public static String PARAMETER_PATTERN = "<%=\\s*parameter\\[\\\"?(.*?)\\\"?\\]\\s*%>";
-    public static String PARAMETER_PATTERN_JSON_SAFE = "<%= parameter\\['(.*?)'\\] %>";
-    public static String PARAMETER_PATTERN_GROUP_MATCH = "<%=\\s*parameter\\[\\s*\"(.*?)\"\\s*\\]\\s*%>";
-    public static String QUERY_PATTERN_JSON = "^\\s*\\{.*?\\}\\s*$";
-    public static String QUERY_PATTERN_KINETIC = "^\\s*\\\\[\\s*\\{.*?\\}\\s*,\\s*" + PARAMETER_PATTERN + "\\s*\\\\]\\s*$";
-    public static String QUERY_PATTERN_SOLR_JSON = "^\\s*\\\\[\\s*\\{.*?\\}\\s*,\\s*\\\\{.*?\\\\}\\s*\\\\]\\s*$";
-    
-    public static String QUERY_STYLE_KINETIC = "Kinetic DSL";
-    public static String QUERY_STYLE_SOLR = "Solr DSL";
-    public static String QUERY_STYLE_LUCENE = "lucene";
-    
     public static String METADATA_FIELD_CONCATE_OPERATOR = "concatenatingOperator";
     public static String METADATA_FIELD_QUERY_PREFIX = "queryPrefix";
     public static String METADATA_FIELD_QUERY_STYLE = "type";
     public static String METADATA_FIELD_WHITELISTED_FIELDS = "whitelistedFields";
+    public static String PARAMETER_PATTERN_JSON_SAFE = "<%= parameter\\['(.*?)'\\] %>";
+    public static String PARAMETER_PATTERN_GROUP_MATCH = "<%=\\s*parameter\\[\\s*\"(.*?)\"\\s*\\]\\s*%>";
+    public static String QUERY_PATTERN_JSON = "^\\s*\\{.*?\\}\\s*$";
+    public static String QUERY_STYLE_KINETIC = "Kinetic DSL";
+    public static String QUERY_STYLE_SOLR = "Solr DSL";
+    
+    private Map<String, Object> queryMetadata = null;
     
     @Override
     public String encodeParameter(String name, String value) {
@@ -52,23 +47,13 @@ public class SolrQualificationParser extends QualificationParser {
     @Override
     public String parse(String query, Map<String, String> parameters) throws BridgeError {
 
-        Map<String, Object> queryMetadata = null;
         String parsedQuery = new String();
-        
-        // Change <%= parameter["asdf"] %> to <%= parameter['asdf'] %> so we can safely-ish parse the bridge query JSON.
+        parseMetadataJson(query);
+        // Change <%= parameter["asdf"] %> to <%= parameter['asdf'] %> so we can parse the bridge query JSON.
         query = query.replaceAll(PARAMETER_PATTERN_GROUP_MATCH, "<%= parameter['$1'] %>");
-        boolean metadataDetected = query.matches(QUERY_PATTERN_JSON);
-        if (metadataDetected) {
-            try {
-                queryMetadata = (Map<String, Object>)JSONValue.parseWithException(query);
-            } catch (ParseException exceptionDetails) {
-                throw new BridgeError(
-                    String.format("The bridge query (%s) appears to be a JSON Object " +
-                    "instead of a lucene query because it starts and ends with curly braces." +
-                    " The query failed however to parse successfully as JSON.", query),
-                    exceptionDetails
-                );
-            }
+        
+        if (queryMetadata != null) {
+
             String queryType = (String)queryMetadata.get("type");
             String jsonQuery = (String)queryMetadata.get("query");
 
@@ -76,7 +61,7 @@ public class SolrQualificationParser extends QualificationParser {
                 String concateOperator = (String)queryMetadata.get("concateOperator");
                 String queryPrefix = (String)queryMetadata.get("queryPrefix");
                 List<String> whitelistFields = (List<String>)queryMetadata.get("whitelistFields");
-                parsedQuery = parseKineticDsl(
+                parsedQuery = parseDslKinetic(
                     queryPrefix, 
                     whitelistFields, 
                     concateOperator, 
@@ -84,7 +69,7 @@ public class SolrQualificationParser extends QualificationParser {
                     parameters
                 );
             } else if (StringUtils.equalsIgnoreCase(queryType, QUERY_STYLE_SOLR)) {
-                parsedQuery = parseSolrDsl(true, jsonQuery, parameters);
+                parsedQuery = parseDslSolr(true, jsonQuery, parameters);
             } else {
                 throw new BridgeError(
                     String.format(
@@ -96,14 +81,37 @@ public class SolrQualificationParser extends QualificationParser {
             }
             
         } else {
-            parsedQuery = parseSolrDsl(false, query, parameters);
+            parsedQuery = parseDslSolr(false, query, parameters);
         }
         
         return parsedQuery;
         
     }
+
+
+    /*----------------------------------------------------------------------------------------------
+     * PRIVATE HELPER METHODS
+     *--------------------------------------------------------------------------------------------*/
     
-    private String parseKineticDsl(String queryPrefix, List<String> whitelistedFields, String concateOperator, String jsonQuery, Map<String, String> parameters) throws BridgeError {
+    public String getJsonRootPath(String query) throws BridgeError {
+        
+        String jsonRootPath = null;
+        // parseMetadataJson sets instance variable queryMetadata
+        this.parseMetadataJson(query);
+        if (this.queryMetadata != null) {
+            String metadataRoot = (String)queryMetadata.get("jsonRootPath");
+            if (StringUtils.isNotBlank(metadataRoot)) jsonRootPath = metadataRoot;
+        }
+        return jsonRootPath;
+        
+    }
+    
+    
+    /*----------------------------------------------------------------------------------------------
+     * PRIVATE HELPER METHODS
+     *--------------------------------------------------------------------------------------------*/
+    
+    private String parseDslKinetic(String queryPrefix, List<String> whitelistedFields, String concateOperator, String jsonQuery, Map<String, String> parameters) throws BridgeError {
 
         Map<String, Object> queryConcatenation = new HashMap();
         StringBuilder query = new StringBuilder();
@@ -179,7 +187,7 @@ public class SolrQualificationParser extends QualificationParser {
         return query.toString();
     }
 
-    private String parseSolrDsl(boolean isJsonQuery, String solrQuery, Map<String, String> parameters) throws BridgeError {
+    private String parseDslSolr(boolean isJsonQuery, String solrQuery, Map<String, String> parameters) throws BridgeError {
         
         StringBuffer resultBuffer = new StringBuffer();
         Pattern pattern = Pattern.compile(PARAMETER_PATTERN_JSON_SAFE);
@@ -218,6 +226,27 @@ public class SolrQualificationParser extends QualificationParser {
         matcher.appendTail(resultBuffer);
         return resultBuffer.toString();
 
+    }
+    
+    private Map<String, Object> parseMetadataJson(String query) throws BridgeError {
+        // Only parse once.
+        if (queryMetadata != null) return queryMetadata;
+        // Change <%= parameter["asdf"] %> to <%= parameter['asdf'] %> so we can parse the bridge query JSON.
+        query = query.replaceAll(PARAMETER_PATTERN_GROUP_MATCH, "<%= parameter['$1'] %>");
+        boolean metadataDetected = query.matches(QUERY_PATTERN_JSON);
+        if (metadataDetected) {
+            try {
+                this.queryMetadata = (Map<String, Object>)JSONValue.parseWithException(query);
+            } catch (ParseException exceptionDetails) {
+                throw new BridgeError(
+                    String.format("The bridge query (%s) appears to be a JSON Object " +
+                    "instead of a lucene query because it starts and ends with curly braces." +
+                    " The query failed however to parse successfully as JSON.", query),
+                    exceptionDetails
+                );
+            }
+        }
+        return queryMetadata;
     }
     
 }

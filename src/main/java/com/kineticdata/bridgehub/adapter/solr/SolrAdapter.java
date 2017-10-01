@@ -1,5 +1,8 @@
 package com.kineticdata.bridgehub.adapter.solr;
 
+import com.jayway.jsonpath.DocumentContext;
+import com.jayway.jsonpath.InvalidPathException;
+import com.jayway.jsonpath.JsonPath;
 import com.kineticdata.bridgehub.adapter.BridgeAdapter;
 import com.kineticdata.bridgehub.adapter.BridgeError;
 import com.kineticdata.bridgehub.adapter.BridgeRequest;
@@ -11,7 +14,6 @@ import com.kineticdata.commons.v1.config.ConfigurableProperty;
 import com.kineticdata.commons.v1.config.ConfigurablePropertyMap;
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
-import java.net.URLEncoder;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -46,6 +48,9 @@ public class SolrAdapter implements BridgeAdapter {
     
     /** Defines the adapter display name */
     public static final String NAME = "Solr Bridge";
+    public static final String JSON_ROOT_DEFAULT = "$.response.docs";
+    public static final String REGEX_ROOT_PATTERN = "^\\{.*?\\}\\|(\\$\\..*)$";
+    public static Pattern jsonRootPattern = Pattern.compile(REGEX_ROOT_PATTERN);
     
     /** Defines the logger */
     protected static final org.slf4j.Logger logger = LoggerFactory.getLogger(SolrAdapter.class);
@@ -56,6 +61,7 @@ public class SolrAdapter implements BridgeAdapter {
     private String username;
     private String password;
     private String apiEndpoint;
+    private String jsonRootPath = JSON_ROOT_DEFAULT;
 
     /** Defines the collection of property names for the adapter */
     public static class Properties {
@@ -111,81 +117,98 @@ public class SolrAdapter implements BridgeAdapter {
     @Override
     public Count count(BridgeRequest request) throws BridgeError {
 
-        String jsonResponse = solrQuery("count", request);
-        
-        // Parse the Response String into a JSON Object
-        JSONObject json = (JSONObject)JSONValue.parse(jsonResponse);
-        JSONObject response = (JSONObject)json.get("response");
-        // Get the count value from the response object
-        Object countObj = response.get("numFound");
-        // Assuming that the countObj is a string, parse it to an integer
-        Long count = (Long)countObj;
-
+        SolrQualificationParser solrParser = new SolrQualificationParser();            
+        String jsonResponse = solrQuery("count", request, solrParser);
+        Long count = JsonPath.parse(jsonResponse).read("$.response.numFound", Long.class);
         // Create and return a Count object.
         return new Count(count);
+        
     }
 
     @Override
     public Record retrieve(BridgeRequest request) throws BridgeError {
         
-        String jsonResponse = solrQuery("search", request);
-        
-        JSONObject json = (JSONObject)JSONValue.parse(jsonResponse);
-        JSONObject response = (JSONObject)json.get("response");
-        Long recordCount = (Long)response.get("numFound");
-        
+        SolrQualificationParser solrParser = new SolrQualificationParser();
+        String metadataRoot = solrParser.getJsonRootPath(request.getQuery());
+        if (StringUtils.isNotBlank(metadataRoot)) jsonRootPath = metadataRoot;
+
+        String jsonResponse = solrQuery("search", request, solrParser);
+        DocumentContext jsonDocument = JsonPath.parse(jsonResponse);
+        Object objectRoot = jsonDocument.read(jsonRootPath);
         Record recordResult = new Record(null);
         
-        if (recordCount == 1) {
-            JSONArray docs = (JSONArray)response.get("docs");
-            Map<String, Object> fieldValues = new HashMap<String, Object>();
-            mapToFields((JSONObject)docs.get(0), new StringBuilder(), fieldValues);
-            recordResult = new Record(fieldValues);
-        } else if (recordCount > 1) {
-            throw new BridgeError("Multiple results matched an expected single match query");
+        if (objectRoot instanceof List) {
+            List<Object> listRoot = (List)objectRoot;
+            if (listRoot.size() == 1) {
+                Map<String, Object> recordValues = new HashMap();
+                for (String field : request.getFields()) {
+                    try {
+                        recordValues.put(field, JsonPath.parse(listRoot.get(0)).read(field));
+                    } catch (InvalidPathException e) {
+                        recordValues.put(field, null);
+                    }
+                }
+                recordResult = new Record(recordValues);
+            } else {
+                throw new BridgeError("Multiple results matched an expected single match query");
+            }
+        } else if (objectRoot instanceof Map) {
+            Map<String, Object> recordValues = new HashMap();
+            for (String field : request.getFields()) {
+                try {
+                    recordValues.put(field, JsonPath.parse(objectRoot).read(field));
+                } catch (InvalidPathException e) {
+                    recordValues.put(field, null);
+                }
+            }
+            recordResult = new Record(recordValues);
         }
         
-        // return a Record object.
         return recordResult;
+        
     }
 
     @Override
     public RecordList search(BridgeRequest request) throws BridgeError {
         
-        String jsonResponse = solrQuery("search", request);
-        JSONObject json = (JSONObject)JSONValue.parse(jsonResponse);
-        JSONObject response = (JSONObject)json.get("response");
-        JSONArray docsArray = (JSONArray)response.get("docs");
-        Object countObj = response.get("numFound");
-        Long count = (Long)countObj;
+        SolrQualificationParser solrParser = new SolrQualificationParser();
+        String metadataRoot = solrParser.getJsonRootPath(request.getQuery());
+        if (StringUtils.isNotBlank(metadataRoot)) jsonRootPath = metadataRoot;
         
+        String jsonResponse = solrQuery("search", request, solrParser);
         List<Record> recordList = new ArrayList<Record>();
-        List<String> fieldList = new ArrayList<String>();
-        Set<String> uniqueFields = new LinkedHashSet<String>();
-        
-        for (Object o : docsArray) {
-            // Convert the standard java object to a JSONObject
-            JSONObject jsonObject = (JSONObject)o;
-            // Create a record based on that JSONObject and add it to the list of records
-            Map<String, Object> fieldValues = new HashMap<String, Object>();
-            mapToFields(jsonObject, new StringBuilder(), fieldValues);
-            recordList.add(new Record(fieldValues));
-            uniqueFields.addAll(fieldValues.keySet());
-        }
-        
-        // Create the metadata that needs to be returned.
+        DocumentContext jsonDocument = JsonPath.parse(jsonResponse);
+        Object objectRoot = jsonDocument.read(jsonRootPath);
         Map<String,String> metadata = new LinkedHashMap<String,String>();
-        //Everything
-        metadata.put("count",count.toString());
-        metadata.put("size", String.valueOf(recordList.size()));
-
-        if (request.getFields() != null && request.getFields().isEmpty() == false) {
-            fieldList = request.getFields();
-        } else if (recordList.isEmpty() == false) {
-            fieldList = new ArrayList<String>(uniqueFields);
+        metadata.put("count",JsonPath.parse(jsonResponse).read("$.response.numFound", String.class));
+        
+        if (objectRoot instanceof List) {
+            List<Object> listRoot = (List)objectRoot;
+            metadata.put("size", String.valueOf(listRoot.size()));
+            for (Object arrayElement : listRoot) {
+                Map<String, Object> recordValues = new HashMap();
+                DocumentContext jsonObject = JsonPath.parse(arrayElement);
+                for (String field : request.getFields()) {
+                    try {
+                        recordValues.put(field, jsonObject.read(field));
+                    } catch (InvalidPathException e) {
+                        recordValues.put(field, null);
+                    }
+                }
+                recordList.add(new Record(recordValues));
+            }
+        } else if (objectRoot instanceof Map) {
+            metadata.put("size", "1");
+            Map<String, Object> recordValues = new HashMap();
+            DocumentContext jsonObject = JsonPath.parse(objectRoot);
+            for (String field : request.getFields()) {
+                recordValues.put(field, jsonObject.read(field));
+            }
+            recordList.add(new Record(recordValues));
         }
         
-        return new RecordList(fieldList, recordList, metadata);
+        return new RecordList(request.getFields(), recordList, metadata);
+        
     }
     
     
@@ -228,12 +251,11 @@ public class SolrAdapter implements BridgeAdapter {
         
     }
     
-    public HttpEntity buildRequestBody(String queryMethod, BridgeRequest request) throws BridgeError {
+    public HttpEntity buildRequestBody(String queryMethod, BridgeRequest request, SolrQualificationParser solrParser) throws BridgeError {
         List<NameValuePair> params = new ArrayList<NameValuePair>();
         HttpEntity result = null;
         
-        SolrQualificationParser parser = new SolrQualificationParser();
-        String query = parser.parse(request.getQuery(),request.getParameters());        
+        String query = solrParser.parse(request.getQuery(),request.getParameters());        
         //Set query to return everything if no qualification defined.
         if (StringUtils.isBlank(query)) {
             query = "*:*";
@@ -298,21 +320,6 @@ public class SolrAdapter implements BridgeAdapter {
         return result;
     }
     
-    public void mapToFields (JSONObject currentObject, StringBuilder currentFieldPrefix, Map<String, Object> bridgeFields) throws BridgeError {
-        
-        for (Object jsonKey : currentObject.keySet()) {
-            String strKey = (String)jsonKey;
-            Object jsonValue = currentObject.get(jsonKey);
-            if (jsonValue instanceof String || jsonValue instanceof Number) {
-                bridgeFields.put(
-                    strKey,
-                    jsonValue.toString()
-                );
-            }
-        }
-        
-    }
-    
 
     /*----------------------------------------------------------------------------------------------
      * PRIVATE HELPER METHODS
@@ -323,7 +330,7 @@ public class SolrAdapter implements BridgeAdapter {
         get.setHeader("Authorization", "Basic " + new String(basicAuthBytes));
     }
     
-    private String solrQuery(String queryMethod, BridgeRequest request) throws BridgeError{
+    private String solrQuery(String queryMethod, BridgeRequest request, SolrQualificationParser solrParser) throws BridgeError{
         
         String result = null;
         String url = buildUrl(queryMethod, request);
@@ -340,7 +347,7 @@ public class SolrAdapter implements BridgeAdapter {
         }
         
         post.setEntity(
-            buildRequestBody(queryMethod, request)
+            buildRequestBody(queryMethod, request, solrParser)
         );
 
         // Make the call to the REST source to retrieve data and convert the response from an
