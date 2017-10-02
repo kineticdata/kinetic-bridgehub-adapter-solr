@@ -2,7 +2,6 @@ package com.kineticdata.bridgehub.adapter.solr;
 
 import com.kineticdata.bridgehub.adapter.BridgeError;
 import com.kineticdata.bridgehub.adapter.QualificationParser;
-import static com.kineticdata.bridgehub.adapter.QualificationParser.PARAMETER_PATTERN;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
@@ -121,6 +120,12 @@ public class SolrQualificationParser extends QualificationParser {
         if (StringUtils.isBlank(concateOperator)) {
             concateOperator = "AND";
         }
+        if (StringUtils.isBlank(jsonQuery)) {
+            throw new BridgeError("The Kinetic DSL query parameter value was not specified or was blank. The 'value' key is required.");
+        }
+        
+        jsonQuery = jsonQuery.replaceAll(PARAMETER_PATTERN_JSON_SAFE, "<%= parameter[\"$1\"] %>");
+        jsonQuery = parseNoEscaping(jsonQuery, parameters);
         
         try {
             queryConcatenation = (Map<String, Object>)JSONValue.parseWithException(jsonQuery);
@@ -247,6 +252,35 @@ public class SolrQualificationParser extends QualificationParser {
             }
         }
         return queryMetadata;
+    }
+    
+    private String parseNoEscaping(String query, Map<String, String> parameters) throws BridgeError {
+        StringBuffer resultBuffer = new StringBuffer();
+        Pattern pattern = Pattern.compile(super.PARAMETER_PATTERN);
+        Matcher matcher = pattern.matcher(query);
+
+        while (matcher.find()) {
+            // Retrieve the necessary values
+            String parameterName = matcher.group(1);
+            // If there were no parameters provided
+            if (parameters == null) {
+                throw new BridgeError("Unable to parse qualification, "+
+                    "the '"+parameterName+"' parameter was referenced but no "+
+                    "parameters were provided.");
+            }
+            String parameterValue = parameters.get(parameterName);
+            // If there is a reference to a parameter that was not passed
+            if (parameterValue == null) {
+                throw new BridgeError("Unable to parse qualification, "+
+                    "the '"+parameterName+"' parameter was referenced but "+
+                    "not provided.");
+            }
+
+            matcher.appendReplacement(resultBuffer, Matcher.quoteReplacement(parameterValue));
+        }
+
+        matcher.appendTail(resultBuffer);
+        return resultBuffer.toString();
     }
     
 }
