@@ -241,6 +241,7 @@ public class SolrAdapter implements BridgeAdapter {
                 .append("&start=" + offset);
         }
         
+        logger.trace("Solr URL: {}", url.toString());
         return url.toString();
         
     }
@@ -258,8 +259,10 @@ public class SolrAdapter implements BridgeAdapter {
         // If the query is a JSON object...
         if (query.matches("^\\s*\\{.*?\\}\\s*$")) {
             params.add(new BasicNameValuePair("json", query));
+            logger.trace(String.format("JSON Query being sent to solr: %s", query));
         } else {
             params.add(new BasicNameValuePair("q", query));
+            logger.trace(String.format("Lucene Query being sent to solr: %s", query));
         }
                 
         //only set sorting and field return limitation if we're not counting.
@@ -319,9 +322,9 @@ public class SolrAdapter implements BridgeAdapter {
      * PRIVATE HELPER METHODS
      *--------------------------------------------------------------------------------------------*/
     private void addBasicAuthenticationHeader(HttpRequestBase get, String username, String password) {
-        String creds = username + ":" + password;
+        String creds = String.format("%s:%s", username, password);
         byte[] basicAuthBytes = Base64.encodeBase64(creds.getBytes());
-        get.setHeader("Authorization", "Basic " + new String(basicAuthBytes));
+        get.setHeader("Authorization", String.format("Basic %s", new String(basicAuthBytes)));
     }
     
     private String solrQuery(String queryMethod, BridgeRequest request, SolrQualificationParser solrParser) throws BridgeError{
@@ -349,7 +352,7 @@ public class SolrAdapter implements BridgeAdapter {
         try {
             response = client.execute(post);
             Integer responseStatus = response.getStatusLine().getStatusCode();
-            logger.trace("Request response code: "+response.getStatusLine().getStatusCode());
+            logger.trace(String.format("Request response code: %s", response.getStatusLine().getStatusCode()));
             
             if (responseStatus >= 300 || responseStatus < 200) {
                 HttpEntity entity = response.getEntity();
@@ -368,9 +371,9 @@ public class SolrAdapter implements BridgeAdapter {
 
         } catch (IOException e) {
             logger.error(e.getMessage());
-            throw new BridgeError("Unable to make a connection to the Solr server");
+            throw new BridgeError("Unable to make a connection to the Solr server", e);
         }
-        logger.trace("Solr response - Raw Output: "+ result);
+        logger.trace(String.format("Solr response - Raw Output: %s", result));
         
         return result;
     }
@@ -394,7 +397,7 @@ public class SolrAdapter implements BridgeAdapter {
                 throw new BridgeError("Unauthorized: The inputted Username/Password combination is not valid.");
             }
             if (responseCode < 200 || responseCode >= 300) {
-                throw new BridgeError("Unsuccessful HTTP response - the server returned a " + responseCode + " status code, expected 200.");
+                throw new BridgeError(String.format("Unsuccessful HTTP response - the server returned a %s status code, expected 200.", responseCode));
             }
         }
         catch (IOException e) {

@@ -114,14 +114,16 @@ public class SolrQualificationParser extends QualificationParser {
 
         Map<String, Object> queryConcatenation = new HashMap();
         StringBuilder query = new StringBuilder();
-        if (queryPrefix != null) {
-            query.append(queryPrefix);
+        if (StringUtils.isNotBlank(queryPrefix)) {
+            query
+                .append(queryPrefix)
+                .append(" AND ( ");
         }
         if (StringUtils.isBlank(concateOperator)) {
             concateOperator = "AND";
         }
         if (StringUtils.isBlank(jsonQuery)) {
-            throw new BridgeError("The Kinetic DSL query parameter value was not specified or was blank. The 'value' key is required.");
+            throw new BridgeError("The Kinetic DSL query parameter value was not specified or was blank. The 'query' key is required.");
         }
         
         jsonQuery = jsonQuery.replaceAll(PARAMETER_PATTERN_JSON_SAFE, "<%= parameter[\"$1\"] %>");
@@ -131,7 +133,7 @@ public class SolrQualificationParser extends QualificationParser {
             queryConcatenation = (Map<String, Object>)JSONValue.parseWithException(jsonQuery);
         } catch (ParseException exceptionDetails) {
             throw new BridgeError(
-                String.format("The JSON query parameter value (%s) did not parse successfully as JSON.", jsonQuery),
+                String.format("The Kinetic DSL 'query' key string value (%s) did not parse successfully as JSON.", jsonQuery),
                 exceptionDetails
             );
         }
@@ -150,13 +152,15 @@ public class SolrQualificationParser extends QualificationParser {
             if (whitelistedFields == null || whitelistedFields.contains(fieldName)) {
                 Map<String, Object> fieldProperties = (Map<String, Object>)queryPartial.getValue();
                 String matchType = (String)fieldProperties.get("matcher");
-                if (matchType == null) {
-                    matchType = "exact";
-                }
+                Boolean isPhraseMatch = (Boolean)fieldProperties.get("isPhrase");
+                if (matchType == null) matchType = "exact";
+                if (isPhraseMatch == null) isPhraseMatch = false;
                 String fieldValue = (String)fieldProperties.get("value");
                 if (fieldValue != null) {
                     query.append(fieldName)
                         .append(":");
+                    // Wrap the field matching in quotes if this is a phrase match
+                    if (isPhraseMatch) query.append("\"");
                     if (matchType.equals("endsWith") || matchType.equals("like")) {
                         query.append("*");
                     }
@@ -164,22 +168,26 @@ public class SolrQualificationParser extends QualificationParser {
                     if (matchType.equals("startsWith") || matchType.equals("like")) {
                         query.append("*");
                     }
+                    // Wrap the field matching in quotes if this is a phrase match
+                    if (isPhraseMatch) query.append("\"");
                 } else {
                     throw new BridgeError(
                         String.format(
-                            "The %s field is missing a value key in the Kinetic Solr DSL JSON: %s",
+                            "The %s field is missing a value key in the Kinetic DSL JSON: %s",
                             fieldName,
                             jsonQuery
                         )
                     );
                 }
-                
             }
-            
             firstRun = false;
-            
         }
         
+        if (StringUtils.isNotBlank(queryPrefix)) {
+            query
+                .append(queryPrefix)
+                .append(" )");
+        }
         if (StringUtils.isEmpty(query.toString())) {
             throw new BridgeError (
                 String.format(
