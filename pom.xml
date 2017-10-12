@@ -8,8 +8,8 @@
 
     <name>kinetic-bridgehub-adapter-solr</name>
     <scm>
-        <connection>scm:git:https://github.com/kineticcommunity/kinetic-bridgehub-adapter-elasticsearch.git</connection>
-        <developerConnection>scm:git:https://github.com/kineticcommunity/kinetic-bridgehub-adapter-elasticsearch.git</developerConnection>
+        <connection>scm:git:https://github.com/kineticcommunity/kinetic-bridgehub-adapter-solr.git</connection>
+        <developerConnection>scm:git:https://github.com/kineticcommunity/kinetic-bridgehub-adapter-solr.git</developerConnection>
     </scm>
 
     <repositories>

@@ -1,8 +1,3 @@
-/*
- * To change this license header, choose License Headers in Project Properties.
- * To change this template file, choose Tools | Templates
- * and open the template in the editor.
- */
 package com.kineticdata.bridgehub.adapter.solr;
 
 import com.kineticdata.bridgehub.adapter.BridgeError;
@@ -15,19 +10,15 @@ import java.util.Map;
 import org.junit.Test;
 import static org.junit.Assert.*;
 
-
-/**
- *
- * @author austin.peters
- */
 public class SolrAdapterTest {
     
+    //solr start -e techproducts
     private final String apiUrl = "http://localhost:8983/solr";
-    private final String structure = "sample_techproducts_configs";
+    private final String structure = "techproducts";
     
     @Test
     public void testCountResults() throws Exception {
-        Integer expectedCount = 1;
+        Integer expectedCount = 3;
         String expectedUrl = String.format("%s/%s/select?wt=json&rows=0", apiUrl, structure);
         Count actualCount;
         
@@ -41,7 +32,7 @@ public class SolrAdapterTest {
         adapter.initialize();
         
         Map<String, String> bridgeParameters = new HashMap<String, String>();
-        bridgeParameters.put("log level", "error");
+        bridgeParameters.put("product name", "ipod");
         
         Map<String, String> bridgeMetadata = new HashMap<String, String>();
         bridgeMetadata.put("pageSize", "1000");
@@ -51,7 +42,7 @@ public class SolrAdapterTest {
         request.setParameters(bridgeParameters);
         request.setMetadata(bridgeMetadata);        
         request.setStructure(structure);
-        request.setQuery("message:<%= parameter[\"log level\"] %>");
+        request.setQuery("name:<%= parameter[\"product name\"] %>");
         
         assertEquals(expectedUrl, adapter.buildUrl("count", request));
         
@@ -67,7 +58,7 @@ public class SolrAdapterTest {
     
     @Test
     public void testCountResults_solrJson() throws Exception {
-        Integer expectedCount = 1;
+        Integer expectedCount = 3;
         String expectedUrl = String.format("%s/%s/select?wt=json&rows=0", apiUrl, structure);
         Count actualCount;
         
@@ -81,7 +72,7 @@ public class SolrAdapterTest {
         adapter.initialize();
         
         Map<String, String> bridgeParameters = new HashMap<String, String>();
-        bridgeParameters.put("log level", "error");
+        bridgeParameters.put("product name", "ipod");
         
         Map<String, String> bridgeMetadata = new HashMap<String, String>();
         bridgeMetadata.put("pageSize", "1000");
@@ -91,7 +82,7 @@ public class SolrAdapterTest {
         request.setParameters(bridgeParameters);
         request.setMetadata(bridgeMetadata);        
         request.setStructure(structure);
-        request.setQuery("{\"type\": \"Solr DSL\", \"query\": \"{\\\"query\\\": \\\"message:*<%= parameter[\"log level\"] %>*\\\"}\"}");
+        request.setQuery("{\"type\": \"Solr DSL\", \"query\": \"{\\\"query\\\": \\\"name:*<%= parameter[\"product name\"] %>*\\\"}\"}");
         
         assertEquals(expectedUrl, adapter.buildUrl("count", request));
         
@@ -103,6 +94,33 @@ public class SolrAdapterTest {
         }
         
         assertEquals(expectedCount, actualCount.getValue());
+    }
+    
+    @Test
+    public void testPaginationUrl() throws BridgeError{
+        Integer pageSize = 25;
+        Integer offset = 5;
+        String expectedUrl = String.format("%s/%s/select?wt=json&rows=%s&start=%s", apiUrl, structure, pageSize, offset);
+        
+        Map<String,String> configuration = new HashMap<String,String>();
+        configuration.put("Username",null);
+        configuration.put("Password",null);
+        configuration.put("Solr URL",apiUrl);
+        
+        SolrAdapter adapter = new SolrAdapter();
+        adapter.setProperties(configuration);
+        adapter.initialize();
+        
+        Map<String, String> bridgeMetadata = new HashMap<String, String>();
+        bridgeMetadata.put("pageSize", pageSize.toString());
+        bridgeMetadata.put("offset", offset.toString());
+        
+        BridgeRequest request = new BridgeRequest();
+        request.setMetadata(bridgeMetadata);
+        request.setStructure(structure);
+        request.setQuery("message:*test*");
+        
+        assertEquals(expectedUrl, adapter.buildUrl("search", request));
     }
     
     @Test
@@ -121,7 +139,7 @@ public class SolrAdapterTest {
         adapter.initialize();
         
         Map<String, String> bridgeParameters = new HashMap<String, String>();
-        bridgeParameters.put("kinetic json query", "{\"message\": { \"value\": \"error\", \"matcher\": \"like\" } }");
+        bridgeParameters.put("kinetic json query", "{\"name\": { \"value\": \"ipod\", \"matcher\": \"like\" }, \"features\": {\"value\": \"mp3\"} }");
         
         Map<String, String> bridgeMetadata = new HashMap<String, String>();
         bridgeMetadata.put("pageSize", "1000");
@@ -159,7 +177,7 @@ public class SolrAdapterTest {
         adapter.initialize();
         
         Map<String, String> bridgeParameters = new HashMap<String, String>();
-        bridgeParameters.put("log level", "error");
+        bridgeParameters.put("product name", "GB18030");
         
         Map<String, String> bridgeMetadata = new HashMap<String, String>();
         bridgeMetadata.put("pageSize", "1000");
@@ -169,11 +187,11 @@ public class SolrAdapterTest {
         request.setParameters(bridgeParameters);
         request.setMetadata(bridgeMetadata);
         request.setStructure(structure);
-        request.setQuery("message:<%= parameter[\"log level\"] %>");
+        request.setQuery("name:<%= parameter[\"product name\"] %>");
         request.setFields(
             Arrays.asList(
-                "message",
-                "_timestamp"
+                "name",
+                "keywords"
             )
         );
         
@@ -181,6 +199,6 @@ public class SolrAdapterTest {
         
         Record bridgeRecord = adapter.retrieve(request);
         
-    }    
-            
+    }
+    
 }

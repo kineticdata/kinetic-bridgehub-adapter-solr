@@ -19,7 +19,6 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.regex.Pattern;
 import org.apache.http.HttpEntity;
 import org.apache.http.HttpResponse;
 import org.apache.http.client.HttpClient;
@@ -43,8 +42,6 @@ public class SolrAdapter implements BridgeAdapter {
     /** Defines the adapter display name */
     public static final String NAME = "Solr Bridge";
     public static final String JSON_ROOT_DEFAULT = "$.response.docs";
-    public static final String REGEX_ROOT_PATTERN = "^\\{.*?\\}\\|(\\$\\..*)$";
-    public static Pattern jsonRootPattern = Pattern.compile(REGEX_ROOT_PATTERN);
     
     /** Defines the logger */
     protected static final org.slf4j.Logger logger = LoggerFactory.getLogger(SolrAdapter.class);
@@ -124,7 +121,11 @@ public class SolrAdapter implements BridgeAdapter {
         
         SolrQualificationParser solrParser = new SolrQualificationParser();
         String metadataRoot = solrParser.getJsonRootPath(request.getQuery());
-        if (StringUtils.isNotBlank(metadataRoot)) jsonRootPath = metadataRoot;
+        if (StringUtils.isNotBlank(metadataRoot)) {
+            jsonRootPath = metadataRoot;
+        } else {
+            jsonRootPath = JSON_ROOT_DEFAULT;
+        }
 
         String jsonResponse = solrQuery("search", request, solrParser);
         DocumentContext jsonDocument = JsonPath.parse(jsonResponse);
@@ -167,7 +168,11 @@ public class SolrAdapter implements BridgeAdapter {
         
         SolrQualificationParser solrParser = new SolrQualificationParser();
         String metadataRoot = solrParser.getJsonRootPath(request.getQuery());
-        if (StringUtils.isNotBlank(metadataRoot)) jsonRootPath = metadataRoot;
+        if (StringUtils.isNotBlank(metadataRoot)) {
+            jsonRootPath = metadataRoot;
+        } else {
+            jsonRootPath = JSON_ROOT_DEFAULT;
+        }
         
         String jsonResponse = solrQuery("search", request, solrParser);
         List<Record> recordList = new ArrayList<Record>();

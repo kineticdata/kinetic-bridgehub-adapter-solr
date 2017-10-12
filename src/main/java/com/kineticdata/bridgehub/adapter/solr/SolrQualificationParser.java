@@ -33,12 +33,12 @@ public class SolrQualificationParser extends QualificationParser {
         //Next three lines: escape the following characters with a backslash: + - = && || > < ! ( ) { } [ ] ^ " ~ * ? : \ /  
         String regexReservedCharactersPattern = "(\\*|\\+|\\-|\\=|\\~|\\>|\\<|\\\"|\\?|\\^|\\$|\\{|\\}|\\(|\\)|\\:|\\!|\\/|\\[|\\]|\\\\|\\s)";
         if (StringUtils.isNotEmpty(value)) {
-            result = value.replaceAll(regexReservedCharactersPattern, "\\\\$1")
+            result = value.replaceAll(regexReservedCharactersPattern, Matcher.quoteReplacement("\\") + "$1")
                 .replaceAll("\\|\\|", "\\\\||")
                 .replaceAll("\\&\\&", "\\\\&&")
-                .replaceAll("AND", "\\\\A\\\\N\\\\D")
-                .replaceAll("OR", "\\\\O\\\\R")
-                .replaceAll("NOT", "\\\\N\\\\O\\\\T");
+                .replaceAll("\\b+AND\\b+", Matcher.quoteReplacement("\\\\AND"))
+                .replaceAll("\\b+OR\\b+", Matcher.quoteReplacement("\\\\OR"))
+                .replaceAll("\\b+NOT\\b+", Matcher.quoteReplacement("\\\\NOT"));
         }
         return result;
     }
@@ -116,18 +116,20 @@ public class SolrQualificationParser extends QualificationParser {
         StringBuilder query = new StringBuilder();
         if (StringUtils.isNotBlank(queryPrefix)) {
             query
-                .append(queryPrefix)
-                .append(" AND ( ");
+                .append(
+                    parameterReplacement(true, queryPrefix, parameters)
+                )
+                .append(" && ( ");
         }
         if (StringUtils.isBlank(concateOperator)) {
-            concateOperator = "AND";
+            concateOperator = "&&";
         }
         if (StringUtils.isBlank(jsonQuery)) {
             throw new BridgeError("The Kinetic DSL query parameter value was not specified or was blank. The 'query' key is required.");
         }
         
         jsonQuery = jsonQuery.replaceAll(PARAMETER_PATTERN_JSON_SAFE, "<%= parameter[\"$1\"] %>");
-        jsonQuery = parseNoEscaping(jsonQuery, parameters);
+        jsonQuery = parameterReplacement(false, jsonQuery, parameters);
         
         try {
             queryConcatenation = (Map<String, Object>)JSONValue.parseWithException(jsonQuery);
@@ -205,38 +207,51 @@ public class SolrQualificationParser extends QualificationParser {
         StringBuffer resultBuffer = new StringBuffer();
         Pattern pattern = Pattern.compile(PARAMETER_PATTERN_JSON_SAFE);
         Matcher matcher = pattern.matcher(solrQuery);
-
-        while (matcher.find()) {
-            // Retrieve the necessary values
+        
+        if (solrQuery.matches("^\\s*<%= parameter\\['.*?'\\] %>\\s*$")) {
+            matcher.find();
             String parameterName = matcher.group(1);
-            // If there were no parameters provided
-            if (parameters == null) {
-                throw new BridgeError("Unable to parse qualification, "+
-                    "the '"+parameterName+"' parameter was referenced but no "+
-                    "parameters were provided.");
-            }
             String parameterValue = parameters.get(parameterName);
-            // If there is a reference to a parameter that was not passed
-            if (parameterValue == null) {
-                throw new BridgeError("Unable to parse qualification, "+
-                    "the '"+parameterName+"' parameter was referenced but "+
-                    "not provided.");
+            resultBuffer.append(
+                solrQuery.replaceFirst(
+                    PARAMETER_PATTERN_JSON_SAFE, 
+                    parameterValue
+                )
+            );
+        } else {
+            while (matcher.find()) {
+                // Retrieve the necessary values
+                String parameterName = matcher.group(1);
+                // If there were no parameters provided
+                if (parameters == null) {
+                    throw new BridgeError("Unable to parse qualification, "+
+                        "the '"+parameterName+"' parameter was referenced but no "+
+                        "parameters were provided.");
+                }
+                String parameterValue = parameters.get(parameterName);
+                // If there is a reference to a parameter that was not passed
+                if (parameterValue == null) {
+                    throw new BridgeError("Unable to parse qualification, "+
+                        "the '"+parameterName+"' parameter was referenced but "+
+                        "not provided.");
+                }
+
+                String value;
+                // If the query string starts with a curly brace, this is a JSON payload.
+                // else it is supposed to be a query used for the q parameter in a URI Search
+                if (isJsonQuery) {
+                    // if JSON, escape any JSON special characters.
+                    value = JSONValue.escape(parameterValue);
+                } else {
+                    // if not JSON, encode the parameter by escaping any Lucene query syntax reserved characters.
+                    value = encodeParameter(parameterName, parameterValue);
+                }
+                matcher.appendReplacement(resultBuffer, Matcher.quoteReplacement(value));
             }
 
-            String value;
-            // If the query string starts with a curly brace, this is a JSON payload.
-            // else it is supposed to be a query used for the q parameter in a URI Search
-            if (isJsonQuery) {
-                // if JSON, escape any JSON special characters.
-                value = JSONValue.escape(encodeParameter(parameterName, parameterValue));
-            } else {
-                // if not JSON, encode the parameter by escaping any Lucene query syntax reserved characters.
-                value = encodeParameter(parameterName, parameterValue);
-            }
-            matcher.appendReplacement(resultBuffer, Matcher.quoteReplacement(value));
+            matcher.appendTail(resultBuffer);
         }
-
-        matcher.appendTail(resultBuffer);
+        
         return resultBuffer.toString();
 
     }
@@ -262,7 +277,7 @@ public class SolrQualificationParser extends QualificationParser {
         return queryMetadata;
     }
     
-    private String parseNoEscaping(String query, Map<String, String> parameters) throws BridgeError {
+    private String parameterReplacement(boolean encodeParameters, String query, Map<String, String> parameters) throws BridgeError {
         StringBuffer resultBuffer = new StringBuffer();
         Pattern pattern = Pattern.compile(super.PARAMETER_PATTERN);
         Matcher matcher = pattern.matcher(query);
@@ -283,6 +298,9 @@ public class SolrQualificationParser extends QualificationParser {
                     "the '"+parameterName+"' parameter was referenced but "+
                     "not provided.");
             }
+            
+            String value = parameterValue;
+            if (encodeParameters) value = encodeParameter(parameterName, parameterValue);
 
             matcher.appendReplacement(resultBuffer, Matcher.quoteReplacement(parameterValue));
         }
