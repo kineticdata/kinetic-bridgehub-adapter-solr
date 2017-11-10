@@ -47,7 +47,18 @@ public class SolrAdapter implements BridgeAdapter {
     protected static final org.slf4j.Logger logger = LoggerFactory.getLogger(SolrAdapter.class);
 
     /** Adapter version constant. */
-    public static String VERSION = "1.0.0";
+    public static String VERSION;
+    /** Load the properties version from the version.properties file. */
+    static {
+        try {
+            java.util.Properties properties = new java.util.Properties();
+            properties.load(SolrAdapter.class.getResourceAsStream("/"+SolrAdapter.class.getName()+".version"));
+            VERSION = properties.getProperty("version");
+        } catch (IOException e) {
+            logger.warn("Unable to load "+SolrAdapter.class.getName()+" version properties.", e);
+            VERSION = "Unknown";
+        }
+    }
 
     private String username;
     private String password;
