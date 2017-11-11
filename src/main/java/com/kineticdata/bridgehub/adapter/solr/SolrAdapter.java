@@ -23,7 +23,7 @@ import org.apache.http.HttpEntity;
 import org.apache.http.HttpResponse;
 import org.apache.http.client.HttpClient;
 import org.apache.http.client.methods.HttpGet;
-import org.apache.http.impl.client.DefaultHttpClient;
+import org.apache.http.impl.client.HttpClients;
 import org.apache.http.util.EntityUtils;
 import org.apache.commons.codec.binary.Base64;
 import org.apache.commons.lang.StringUtils;
@@ -38,11 +38,11 @@ public class SolrAdapter implements BridgeAdapter {
     /*----------------------------------------------------------------------------------------------
      * PROPERTIES
      *--------------------------------------------------------------------------------------------*/
-    
+
     /** Defines the adapter display name */
     public static final String NAME = "Solr Bridge";
     public static final String JSON_ROOT_DEFAULT = "$.response.docs";
-    
+
     /** Defines the logger */
     protected static final org.slf4j.Logger logger = LoggerFactory.getLogger(SolrAdapter.class);
 
@@ -71,18 +71,18 @@ public class SolrAdapter implements BridgeAdapter {
         public static final String PASSWORD = "Password";
         public static final String API_URL = "Solr URL";
     }
-    
+
     private final ConfigurablePropertyMap properties = new ConfigurablePropertyMap(
         new ConfigurableProperty(Properties.USERNAME),
         new ConfigurableProperty(Properties.PASSWORD).setIsSensitive(true),
         new ConfigurableProperty(Properties.API_URL)
     );
 
-    
+
     /*---------------------------------------------------------------------------------------------
      * SETUP METHODS
      *-------------------------------------------------------------------------------------------*/
-    
+
     @Override
     public void initialize() throws BridgeError {
         this.username = properties.getValue(Properties.USERNAME);
@@ -96,22 +96,22 @@ public class SolrAdapter implements BridgeAdapter {
     public String getName() {
         return NAME;
     }
-    
+
     @Override
     public String getVersion() {
         return VERSION;
     }
-    
+
     @Override
     public void setProperties(Map<String,String> parameters) {
         properties.setValues(parameters);
     }
-    
+
     @Override
     public ConfigurablePropertyMap getProperties() {
         return properties;
     }
-    
+
     /*---------------------------------------------------------------------------------------------
      * IMPLEMENTATION METHODS
      *-------------------------------------------------------------------------------------------*/
@@ -119,17 +119,17 @@ public class SolrAdapter implements BridgeAdapter {
     @Override
     public Count count(BridgeRequest request) throws BridgeError {
 
-        SolrQualificationParser solrParser = new SolrQualificationParser();            
+        SolrQualificationParser solrParser = new SolrQualificationParser();
         String jsonResponse = solrQuery("count", request, solrParser);
         Long count = JsonPath.parse(jsonResponse).read("$.response.numFound", Long.class);
         // Create and return a Count object.
         return new Count(count);
-        
+
     }
 
     @Override
     public Record retrieve(BridgeRequest request) throws BridgeError {
-        
+
         SolrQualificationParser solrParser = new SolrQualificationParser();
         String metadataRoot = solrParser.getJsonRootPath(request.getQuery());
         if (StringUtils.isNotBlank(metadataRoot)) {
@@ -142,7 +142,7 @@ public class SolrAdapter implements BridgeAdapter {
         DocumentContext jsonDocument = JsonPath.parse(jsonResponse);
         Object objectRoot = jsonDocument.read(jsonRootPath);
         Record recordResult = new Record(null);
-        
+
         if (objectRoot instanceof List) {
             List<Object> listRoot = (List)objectRoot;
             if (listRoot.size() == 1) {
@@ -169,14 +169,14 @@ public class SolrAdapter implements BridgeAdapter {
             }
             recordResult = new Record(recordValues);
         }
-        
+
         return recordResult;
-        
+
     }
 
     @Override
     public RecordList search(BridgeRequest request) throws BridgeError {
-        
+
         SolrQualificationParser solrParser = new SolrQualificationParser();
         String metadataRoot = solrParser.getJsonRootPath(request.getQuery());
         if (StringUtils.isNotBlank(metadataRoot)) {
@@ -184,14 +184,14 @@ public class SolrAdapter implements BridgeAdapter {
         } else {
             jsonRootPath = JSON_ROOT_DEFAULT;
         }
-        
+
         String jsonResponse = solrQuery("search", request, solrParser);
         List<Record> recordList = new ArrayList<Record>();
         DocumentContext jsonDocument = JsonPath.parse(jsonResponse);
         Object objectRoot = jsonDocument.read(jsonRootPath);
         Map<String,String> metadata = new LinkedHashMap<String,String>();
         metadata.put("count",JsonPath.parse(jsonResponse).read("$.response.numFound", String.class));
-        
+
         if (objectRoot instanceof List) {
             List<Object> listRoot = (List)objectRoot;
             metadata.put("size", String.valueOf(listRoot.size()));
@@ -216,33 +216,33 @@ public class SolrAdapter implements BridgeAdapter {
             }
             recordList.add(new Record(recordValues));
         }
-        
+
         return new RecordList(request.getFields(), recordList, metadata);
-        
+
     }
-    
-    
+
+
     /*----------------------------------------------------------------------------------------------
      * PUBLIC HELPER METHODS
      *--------------------------------------------------------------------------------------------*/
-    
+
     public String buildUrl(String queryMethod, BridgeRequest request) throws BridgeError {
 
         // Build up the url that you will use to retrieve the source data. Use the query variable
         // instead of request.getQuery() to post a query without parameter placeholders.
         StringBuilder url = new StringBuilder();
-        
+
         Map<String,String> metadata = BridgeUtils.normalizePaginationMetadata(request.getMetadata());
         String pageSize = "1000";
         String offset = "0";
-        
+
         if (StringUtils.isNotBlank(metadata.get("pageSize")) && metadata.get("pageSize").equals("0") == false) {
             pageSize = metadata.get("pageSize");
         }
         if (StringUtils.isNotBlank(metadata.get("offset"))) {
             offset = metadata.get("offset");
         }
-        
+
         url.append(this.apiEndpoint)
             .append("/")
             .append(request.getStructure())
@@ -256,22 +256,22 @@ public class SolrAdapter implements BridgeAdapter {
             url.append("&rows=" + pageSize)
                 .append("&start=" + offset);
         }
-        
+
         logger.trace("Solr URL: {}", url.toString());
         return url.toString();
-        
+
     }
-    
+
     public HttpEntity buildRequestBody(String queryMethod, BridgeRequest request, SolrQualificationParser solrParser) throws BridgeError {
         List<NameValuePair> params = new ArrayList<NameValuePair>();
         HttpEntity result = null;
-        
-        String query = solrParser.parse(request.getQuery(),request.getParameters());        
+
+        String query = solrParser.parse(request.getQuery(),request.getParameters());
         //Set query to return everything if no qualification defined.
         if (StringUtils.isBlank(query)) {
             query = "*:*";
         }
-        
+
         // If the query is a JSON object...
         if (query.matches("^\\s*\\{.*?\\}\\s*$")) {
             params.add(new BasicNameValuePair("json", query));
@@ -280,7 +280,7 @@ public class SolrAdapter implements BridgeAdapter {
             params.add(new BasicNameValuePair("q", query));
             logger.trace(String.format("Lucene Query being sent to solr: %s", query));
         }
-                
+
         //only set sorting and field return limitation if we're not counting.
         if (queryMethod.equals("count") == false) {
 
@@ -318,9 +318,9 @@ public class SolrAdapter implements BridgeAdapter {
                     )
                 );
             }
-            
+
         }
-        
+
         try {
             result = new UrlEncodedFormEntity(params);
         } catch (UnsupportedEncodingException exceptionDetails) {
@@ -329,10 +329,10 @@ public class SolrAdapter implements BridgeAdapter {
                 exceptionDetails
             );
         }
-        
+
         return result;
     }
-    
+
 
     /*----------------------------------------------------------------------------------------------
      * PRIVATE HELPER METHODS
@@ -342,14 +342,14 @@ public class SolrAdapter implements BridgeAdapter {
         byte[] basicAuthBytes = Base64.encodeBase64(creds.getBytes());
         get.setHeader("Authorization", String.format("Basic %s", new String(basicAuthBytes)));
     }
-    
+
     private String solrQuery(String queryMethod, BridgeRequest request, SolrQualificationParser solrParser) throws BridgeError{
-        
+
         String result = null;
         String url = buildUrl(queryMethod, request);
-        
+
         // Initialize the HTTP Client, Response, and Get objects.
-        HttpClient client = new DefaultHttpClient();
+        HttpClient client = HttpClients.createDefault();
         HttpResponse response;
         HttpPost post = new HttpPost(url);
 
@@ -358,7 +358,7 @@ public class SolrAdapter implements BridgeAdapter {
         if (this.username != null && this.password != null) {
             addBasicAuthenticationHeader(post, this.username, this.password);
         }
-        
+
         post.setEntity(
             buildRequestBody(queryMethod, request, solrParser)
         );
@@ -369,7 +369,7 @@ public class SolrAdapter implements BridgeAdapter {
             response = client.execute(post);
             Integer responseStatus = response.getStatusLine().getStatusCode();
             logger.trace(String.format("Request response code: %s", response.getStatusLine().getStatusCode()));
-            
+
             if (responseStatus >= 300 || responseStatus < 200) {
                 HttpEntity entity = response.getEntity();
                 String errorMessage = EntityUtils.toString(entity);
@@ -381,7 +381,7 @@ public class SolrAdapter implements BridgeAdapter {
                     )
                 );
             }
-            
+
             HttpEntity entity = response.getEntity();
             result = EntityUtils.toString(entity);
 
@@ -390,19 +390,19 @@ public class SolrAdapter implements BridgeAdapter {
             throw new BridgeError("Unable to make a connection to the Solr server", e);
         }
         logger.trace(String.format("Solr response - Raw Output: %s", result));
-        
+
         return result;
     }
-    
+
     private void testAuthenticationValues(String restEndpoint, String username, String password) throws BridgeError {
         logger.debug("Testing the authentication credentials");
         HttpGet get = new HttpGet(String.format("%s/admin/cores?action=STATUS",restEndpoint));
-        
+
         if (username != null && password != null) {
             addBasicAuthenticationHeader(get, this.username, this.password);
         }
 
-        DefaultHttpClient client = new DefaultHttpClient();
+        HttpClient client = HttpClients.createDefault();
         HttpResponse response;
         try {
             response = client.execute(get);
@@ -418,7 +418,7 @@ public class SolrAdapter implements BridgeAdapter {
         }
         catch (IOException e) {
             logger.error(e.getMessage());
-            throw new BridgeError("Unable to make a connection to the Solr core status check API endpoint.", e); 
+            throw new BridgeError("Unable to make a connection to the Solr core status check API endpoint.", e);
         }
     }
 
