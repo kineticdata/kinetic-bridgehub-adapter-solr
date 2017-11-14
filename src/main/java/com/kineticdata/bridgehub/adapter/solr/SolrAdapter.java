@@ -32,6 +32,7 @@ import org.apache.http.client.methods.HttpPost;
 import org.apache.http.client.methods.HttpRequestBase;
 import org.apache.http.message.BasicNameValuePair;
 import org.apache.http.client.entity.UrlEncodedFormEntity;
+import org.apache.http.impl.client.HttpClients;
 import org.slf4j.LoggerFactory;
 
 public class SolrAdapter implements BridgeAdapter {
@@ -52,7 +53,6 @@ public class SolrAdapter implements BridgeAdapter {
     private String username;
     private String password;
     private String apiEndpoint;
-    private String jsonRootPath = JSON_ROOT_DEFAULT;
 
     /** Defines the collection of property names for the adapter */
     public static class Properties {
@@ -121,10 +121,9 @@ public class SolrAdapter implements BridgeAdapter {
         
         SolrQualificationParser solrParser = new SolrQualificationParser();
         String metadataRoot = solrParser.getJsonRootPath(request.getQuery());
+        String jsonRootPath = JSON_ROOT_DEFAULT;
         if (StringUtils.isNotBlank(metadataRoot)) {
             jsonRootPath = metadataRoot;
-        } else {
-            jsonRootPath = JSON_ROOT_DEFAULT;
         }
 
         String jsonResponse = solrQuery("search", request, solrParser);
@@ -168,10 +167,9 @@ public class SolrAdapter implements BridgeAdapter {
         
         SolrQualificationParser solrParser = new SolrQualificationParser();
         String metadataRoot = solrParser.getJsonRootPath(request.getQuery());
+        String jsonRootPath = JSON_ROOT_DEFAULT;
         if (StringUtils.isNotBlank(metadataRoot)) {
             jsonRootPath = metadataRoot;
-        } else {
-            jsonRootPath = JSON_ROOT_DEFAULT;
         }
         
         String jsonResponse = solrQuery("search", request, solrParser);
@@ -187,11 +185,13 @@ public class SolrAdapter implements BridgeAdapter {
             for (Object arrayElement : listRoot) {
                 Map<String, Object> recordValues = new HashMap();
                 DocumentContext jsonObject = JsonPath.parse(arrayElement);
-                for (String field : request.getFields()) {
-                    try {
-                        recordValues.put(field, jsonObject.read(field));
-                    } catch (InvalidPathException e) {
-                        recordValues.put(field, null);
+                if (request.getFields() != null) {
+                    for (String field : request.getFields()) {
+                        try {
+                            recordValues.put(field, jsonObject.read(field));
+                        } catch (InvalidPathException e) {
+                            recordValues.put(field, null);
+                        }
                     }
                 }
                 recordList.add(new Record(recordValues));
@@ -294,10 +294,10 @@ public class SolrAdapter implements BridgeAdapter {
                 for (Map.Entry<String,String> entry : BridgeUtils.parseOrder(request.getMetadata("order")).entrySet()) {
                     String key = entry.getKey();
                     if (entry.getValue().equals("DESC")) {
-                        orderList.add(String.format("%s:desc", key));
+                        orderList.add(String.format("%s desc", key));
                     }
                     else {
-                        orderList.add(String.format("%s:asc", key));
+                        orderList.add(String.format("%s asc", key));
                     }
                 }
                 params.add(
@@ -338,7 +338,7 @@ public class SolrAdapter implements BridgeAdapter {
         String url = buildUrl(queryMethod, request);
         
         // Initialize the HTTP Client, Response, and Get objects.
-        HttpClient client = new DefaultHttpClient();
+        HttpClient client = HttpClients.createDefault();
         HttpResponse response;
         HttpPost post = new HttpPost(url);
 
