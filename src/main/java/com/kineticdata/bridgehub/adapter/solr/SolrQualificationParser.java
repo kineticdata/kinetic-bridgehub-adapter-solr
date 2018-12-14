@@ -155,23 +155,50 @@ public class SolrQualificationParser extends QualificationParser {
                 Map<String, Object> fieldProperties = (Map<String, Object>)queryPartial.getValue();
                 String matchType = (String)fieldProperties.get("matcher");
                 Boolean isPhraseMatch = (Boolean)fieldProperties.get("isPhrase");
+                Boolean requireAllValues = (Boolean)fieldProperties.get("requireAll");
+                if (requireAllValues == null) requireAllValues = false;
                 if (matchType == null) matchType = "exact";
                 if (isPhraseMatch == null) isPhraseMatch = false;
-                String fieldValue = (String)fieldProperties.get("value");
+                Object fieldValue = (Object)fieldProperties.get("value");
+                
                 if (fieldValue != null) {
-                    query.append(fieldName)
-                        .append(":");
-                    // Wrap the field matching in quotes if this is a phrase match
-                    if (isPhraseMatch) query.append("\"");
-                    if (matchType.equals("endsWith") || matchType.equals("like")) {
-                        query.append("*");
+                    if (fieldValue instanceof String) {
+                        String valueStr = (String)(fieldValue);
+                        query.append(fieldName)
+                            .append(":");
+                        // Wrap the field matching in quotes if this is a phrase match
+                        if (isPhraseMatch) query.append("\"");
+                        if (matchType.equals("endsWith") || matchType.equals("like")) {
+                            query.append("*");
+                        }
+                        query.append(encodeParameter(fieldName, valueStr));
+                        if (matchType.equals("startsWith") || matchType.equals("like")) {
+                            query.append("*");
+                        }
+                        // Wrap the field matching in quotes if this is a phrase match
+                        if (isPhraseMatch) query.append("\"");
+                    } else if (fieldValue instanceof List) {
+                        List<String> valueList = (List<String>)(fieldValue);
+                        query.append(fieldName)
+                            .append(":(");
+                        for (String value : valueList) {
+                            // Wrap the field matching in quotes if this is a phrase match
+                            if (requireAllValues) query.append("+");
+                            if (isPhraseMatch) query.append("\"");
+                            if (matchType.equals("endsWith") || matchType.equals("like")) {
+                                query.append("*");
+                            }
+                            query.append(encodeParameter(fieldName, value));
+                            if (matchType.equals("startsWith") || matchType.equals("like")) {
+                                query.append("*");
+                            }
+                            // Wrap the field matching in quotes if this is a phrase match
+                            if (isPhraseMatch) query.append("\"");
+                            query.append(" ");
+                        }
+
+                        query.append(")");
                     }
-                    query.append(encodeParameter(fieldName, fieldValue));
-                    if (matchType.equals("startsWith") || matchType.equals("like")) {
-                        query.append("*");
-                    }
-                    // Wrap the field matching in quotes if this is a phrase match
-                    if (isPhraseMatch) query.append("\"");
                 } else {
                     throw new BridgeError(
                         String.format(
