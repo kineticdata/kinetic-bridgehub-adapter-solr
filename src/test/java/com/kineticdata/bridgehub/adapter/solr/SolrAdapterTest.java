@@ -164,6 +164,46 @@ public class SolrAdapterTest {
     }
     
     @Test
+    public void testCountResults_kineticJsonWithFieldGroupMatching() throws Exception {
+        Integer expectedCount = 1;
+        String expectedUrl = String.format("%s/%s/select?wt=json&rows=0", apiUrl, structure);
+        Count actualCount;
+        
+        Map<String,String> configuration = new HashMap<String,String>();
+        configuration.put("Username",null);
+        configuration.put("Password",null);
+        configuration.put("Solr URL",apiUrl);
+        
+        SolrAdapter adapter = new SolrAdapter();
+        adapter.setProperties(configuration);
+        adapter.initialize();
+        
+        Map<String, String> bridgeParameters = new HashMap<String, String>();
+        bridgeParameters.put("kinetic json query", "{\"name\": { \"value\": [\"Apple\", \"ipod\"], \"matcher\": \"like\", \"requireAll\": true} }");
+        
+        Map<String, String> bridgeMetadata = new HashMap<String, String>();
+        bridgeMetadata.put("pageSize", "1000");
+        bridgeMetadata.put("offset", "0");        
+        
+        BridgeRequest request = new BridgeRequest();
+        request.setParameters(bridgeParameters);
+        request.setMetadata(bridgeMetadata);        
+        request.setStructure(structure);
+        request.setQuery("{\"type\": \"Kinetic DSL\", \"query\": \"<%= parameter[\"kinetic json query\"] %>\"}");
+        
+        assertEquals(expectedUrl, adapter.buildUrl("count", request));
+        
+        try {
+            actualCount = adapter.count(request);
+        } catch (BridgeError e) {
+            System.out.println(e.getMessage());
+            throw new RuntimeException(e);
+        }
+        
+        assertEquals(expectedCount, actualCount.getValue());
+    }
+    
+    @Test
     public void testRetrieveResults() throws Exception {
         String expectedUrl = String.format("%s/%s/select?wt=json&rows=1000&start=0", apiUrl, structure);
         
